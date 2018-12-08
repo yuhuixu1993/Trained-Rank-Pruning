@@ -68,7 +68,7 @@ class ValueThreshold(object):
         for i in xrange(len(sigmas)):
             if sigmas[i] < self.T:
                 valid_idx = i
-
+                break
         return valid_idx
 
 # different low-rank decomposition scheme
