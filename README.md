@@ -1,7 +1,7 @@
 # Trained-Rank-Pruning
 PyTorch code for "Trained Rank Pruning for Efficient Neural Networks" <https://arxiv.org/abs/1812.02402><br>
-Our code is built based on  [bearpaw](https://github.com/bearpaw/pytorch-classification)
-<img src=framework.png width=50%>
+Our code is built based on  [bearpaw](https://github.com/bearpaw/pytorch-classification)<br>
+<img src=framework.png width=50%><br>
 What's in this repo so far:
  * TRP code for CIFAR-10 experiments
  * Nuclear regularization code for CIFAR-10 experiments
