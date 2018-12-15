@@ -7,6 +7,15 @@ What's in this repo so far:
  * Nuclear regularization code for CIFAR-10 experiments
  
 #### Simple Examples
+```Shell
+optional arguments:
+  -a                    model
+  --depth               layers
+  --epoths              training epochs
+  -c                    path to save checkpoints
+  --gpu-id              specifiy using GPU or not
+  --nuclear-weight      nuclear regularization parameter
+```
 Training ResNet-20 baseline:
 
 ```
@@ -37,3 +46,16 @@ python cifar-nuclear-regularization.py.py -a resnet --depth 20 --resume checkpoi
 
 #### Notes
 During decomposition, TRP using value threshold(very small value to truncate singular values) based strategy because the trained model is in low-rank format. Other methods including Channel or spatial-wise decomposition baseline methods use energy threshold.
+
+### Citation
+If you think this work is helpful for your own research, please consider add following bibtex config in your latex file
+
+```Latex
+@article{xu2018trained,
+  title={Trained Rank Pruning for Efficient Deep Neural Networks},
+  author={Xu, Yuhui and Li, Yuxi and Zhang, Shuai and Wen, Wei and Wang, Botao and Qi, Yingyong and Chen, Yiran and Lin, Weiyao and Xiong, Hongkai},
+  journal={arXiv preprint arXiv:1812.02402},
+  year={2018}
+}
+
+``
