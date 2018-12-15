@@ -57,5 +57,3 @@ If you think this work is helpful for your own research, please consider add fol
   journal={arXiv preprint arXiv:1812.02402},
   year={2018}
 }
-
-``
