@@ -1,5 +1,5 @@
 # Trained-Rank-Pruning
-PyTorch code for ["Trained Rank Pruning for Efficient Neural Networks"](https://arxiv.org/abs/1812.02402)<br>
+PyTorch code for ["Trained Rank Pruning for Efficient Deep Neural Networks"](https://arxiv.org/abs/1812.02402)<br>
 Our code is built based on  [bearpaw](https://github.com/bearpaw/pytorch-classification)<br>
 <img src=framework.png width=75%><br>
 What's in this repo so far:
