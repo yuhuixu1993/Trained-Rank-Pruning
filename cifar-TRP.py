@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from collections import OrderedDict
 
 from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig
-from decompose import VH_decompose_model,feature_decompose, channel_decompose, \
+from decompose import VH_decompose_model,channel_decompose, \
     EnergyThreshold, ValueThreshold, LinearRate
 
 
