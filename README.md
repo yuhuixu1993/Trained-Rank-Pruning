@@ -51,8 +51,8 @@ During decomposition, TRP using value threshold(very small value to truncate sin
 - Results on CIFAR-10:
 
 |Network| Method |    | # Params | FLOPs |Acc|
-|:-----|:-------:|:-----:|:--------:|:-----:|:-----:|:-----:|
-|Resnet20| Origin |\| 0.27M | 1x|91.74|
+|:-----|:-------:|:-----:|:--------:|:-----:|:-----:|
+|Resnet20| Origin |      \| 0.27M | 1x    |91.74|
 |Resnet20| TRP+Nu |Channel| 0.1M | 2.17x|90.50|
 |Resnet20| TRP+Nu |spatial| 0.08M | 2.84x |90.62|
 ### Citation
