@@ -48,13 +48,16 @@ python cifar-nuclear-regularization.py.py -a resnet --depth 20 --resume checkpoi
 During decomposition, TRP using value threshold(very small value to truncate singular values) based strategy because the trained model is in low-rank format. Other methods including Channel or spatial-wise decomposition baseline methods use energy threshold.
 ## Results
 
-- Results on CIFAR-10:
+- Results on CIFAR-10(without decomposing the final FC):
 
 |Network| Method |  Scheme  | # Params | FLOPs |Acc|
 |:-----|:-------:|:-----:|:--------:|:-----:|:-----:|
 |Resnet20| Origin |   None   | 0.27M | 1x    |91.74|
 |Resnet20| TRP+Nu |Channel| 0.1M | 2.17x|90.50|
 |Resnet20| TRP+Nu |spatial| 0.08M | 2.84x |90.62|
+|Resnet20| Origin |   None   | 0.47M | 1x    |92.26|
+|Resnet20| TRP+Nu |Channel| 0.16M | 2.2x|91.40|
+|Resnet20| TRP+Nu |spatial| 0.11M | 3.4x |91.39|
 ### Citation
 If you think this work is helpful for your own research, please consider add following bibtex config in your latex file
 
