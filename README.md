@@ -46,7 +46,29 @@ python cifar-nuclear-regularization.py.py -a resnet --depth 20 --resume checkpoi
 
 #### Notes
 During decomposition, TRP using value threshold(very small value to truncate singular values) based strategy because the trained model is in low-rank format. Other methods including Channel or spatial-wise decomposition baseline methods use energy threshold.
+## Results
 
+- Results on CIFAR-10(without decomposing the final FC):
+
+|Network| Method |  Scheme  | # Params | FLOPs |Acc|
+|:-----|:-------:|:-----:|:--------:|:-----:|:-----:|
+|Resnet20| Origin |   None   | 0.27M | 1x    |91.74|
+|Resnet20| TRP+Nu |Channel| 0.1M | 2.17x|90.50|
+|Resnet20| TRP+Nu |spatial| 0.08M | 2.84x |90.62|
+|Resnet32| Origin |   None   | 0.47M | 1x    |92.26|
+|Resnet32| TRP+Nu |Channel| 0.16M | 2.2x|91.40|
+|Resnet32| TRP+Nu |spatial| 0.11M | 3.4x |91.39|
+
+- Results on ImageNet(without decomposing the final FC):
+
+|Network| Method |  Scheme  | FLOPs |Top1|Top5|
+|:-----|:-------:|:-----:|:-----:|:-----:|:-----:|
+|Resnet50| Origin |  None | 1x    |75.90|92.80|
+|Resnet50| TRP+Nu |Channel| 2.23x|72.69|91.41|
+|Resnet50| TRP+Nu |Channel| 1.80x|73.97|91.98|
+|Resnet50| Channel Pruning(ICCV) |None|2.00x|-|90.91|
+|Resnet50| Filter Pruning(ICCV) |None|1.58x|72.04|90.67|
+|Resnet50| Filter Pruning(TPAMI) |None|2.26x|72.03|90.99|
 ### Citation
 If you think this work is helpful for your own research, please consider add following bibtex config in your latex file
 
