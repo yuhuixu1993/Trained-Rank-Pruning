@@ -1,6 +1,5 @@
 '''
 Training script for CIFAR-10/100
-Copyright (c) Wei YANG, 2017
 '''
 from __future__ import print_function
 
@@ -23,8 +22,6 @@ import models.cifar as models
 from collections import OrderedDict
 import numpy as np
 import matplotlib.pyplot as plt
-
-from collections import OrderedDict
 
 from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig
 from decompose import VH_decompose_model,channel_decompose, \
@@ -66,7 +63,7 @@ parser.add_argument('-c', '--checkpoint', default='checkpoint', type=str, metava
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 # Architecture
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet20',
+parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet',
                     choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
@@ -84,6 +81,9 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
 parser.add_argument('--gpu-id', default='0', type=str,
                     help='id(s) for CUDA_VISIBLE_DEVICES')
 #decouple options
+parser.add_argument('--decouple-period', '-dp', type=int, default=1, help='set the period of TRP')
+parser.add_argument('--trp', dest='trp', help='set this option to enable TRP during training', action='store_true')
+parser.add_argument('--type', type=str, help='the type of decouple', choices=['NC','VH'], default='NC')
 parser.add_argument('--nuclear-weight', type=float, default=None, help='The weight for nuclear norm regularization')
 parser.add_argument('--retrain', dest='retrain',help='wether retrain from a decoupled model, only valid when evaluation is on', action='store_true')
 
@@ -108,10 +108,18 @@ if use_cuda:
     torch.cuda.manual_seed_all(args.manualSeed)
 
 best_acc = 0  # best test accuracy
+period = args.decouple_period
+assert period >= 1
 
 DEBUG = False # debug option for singular value
 
-f_decouple = VH_decompose_model # set decouple method
+# set decouple method
+if args.type == 'VH':
+    f_decouple = VH_decompose_model
+elif args.type == 'NC':
+    f_decouple = channel_decompose
+else:
+    raise NotImplementedError('no such decouple type %s' % args.type)
 
 def main():
     global best_acc
@@ -210,91 +218,61 @@ def main():
         logger.set_names(['Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
 
 
+    look_up_table = get_look_up_table(model)
     if args.evaluate:
         print('\nEvaluation only')
         test_loss, test_acc = test(testloader, model, criterion, start_epoch, use_cuda)
         print(' Test Loss:  %.8f, Test Acc:  %.2f' % (test_loss, test_acc))
 
-	if DEBUG:
-		# print(model)
-		show_low_rank(model, input_size=[32, 32])
+        if DEBUG:
+            # print(model)
+            show_low_rank(model, input_size=[32, 32], criterion=ValueThreshold(t), type=args.type)
 
-	print(' Start decomposition:')
-	look_up_table = get_look_up_table(model)
-	#print(model)
-        thresholds = [1e-2]#+0.01*x for x in range(20)]
+        print(' Start decomposition:')
+
+        # set different threshold for model compression and test accuracy
+        thresholds = [5e-2] 
         T = np.array(thresholds)
         cr = np.zeros(T.shape)
         acc = np.zeros(T.shape)
-        
+
         model_path = 'net.pth'
         torch.save(model, model_path)
+        result = 'result.pth' if not args.retrain else 'result-retrain.pth'
 
         for i, t in enumerate(thresholds):
             test_model = torch.load(model_path)        
 
-            cr[i] = show_low_rank(test_model, input_size=[32, 32], criterion=ValueThreshold(t))
-	    test_model = f_decouple(test_model, look_up_table,
-                    criterion=ValueThreshold(t),dataloader=testloader, train=False)
-	    #print(model)
-	    print(' Done! test decoupled model')
-	    test_loss, test_acc = test(testloader, test_model, criterion, start_epoch, use_cuda)
+            cr[i] = show_low_rank(test_model, look_up_table, input_size=[32, 32], criterion=ValueThreshold(t), type=args.type)
+            test_model = f_decouple(test_model, look_up_table, criterion=ValueThreshold(t), train=False)
+            #print(model)
+            print(' Done! test decoupled model')
+            test_loss, test_acc = test(testloader, test_model, criterion, start_epoch, use_cuda)
             print(' Test Loss :  %.8f, Test Acc:  %.2f' % (test_loss, test_acc))
             acc[i] = test_acc
-	    
+            
             if args.retrain:
-            # retrain model
-                '''
-                for m in test_model.modules():
-                    if isinstance(m, nn.Conv2d):
-                        n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                        m.weight.data.normal_(0, math.sqrt(2. / n))
-                    elif isinstance(m, nn.BatchNorm2d):
-                        m.weight.data.fill_(1)
-                        m.bias.data.zero_()
-                '''
-                print(' Retrain decoupled model')
+                # retrain model
                 finetune_epoch = 4
-                #args.schedule = [int(finetune_epoch/2), finetune_epoch]
-                
-                best_acc = 0.0
-                optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum,weight_decay=args.weight_decay)
-                global state
-                init_lr = args.lr
-                state['lr'] = init_lr
-             
-                for epoch in range(finetune_epoch):
-           
-                    adjust_learning_rate(optimizer, epoch)
-                    print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, finetune_epoch, state['lr']))
-                    train_loss, train_acc = train(trainloader, test_model, criterion, optimizer, epoch, use_cuda)
-                    test_loss, test_acc = test(testloader, test_model, criterion, epoch, use_cuda)
-                    best_acc = max(test_acc, best_acc)
+                acc[i] = model_retrain(finetune_epoch, test_model, trainloader, \
+                     testloader, criterion, look_up_table, use_cuda)
 
-                    # append logger file
-                    # logger.append([state['lr'], train_loss, test_loss, train_acc, test_acc])
-
-                #logger.close()
-                #logger.plot()
-		#savefig(os.path.join(args.checkpoint, 'log.eps'))
-
-	        acc[i] = best_acc
-
-        torch.save(OrderedDict([('acc',acc),('cr', cr)]), 'result-vh+retrain.pth')
+        torch.save(OrderedDict([('acc',acc),('cr', cr)]), result)
+        print('compression ratio:')
         print(cr)
+        print('accuracy:')
         print(acc)
 
         return
 
     # Train and val
 
-
     for epoch in range(start_epoch, args.epochs):
         adjust_learning_rate(optimizer, epoch)
 
         print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, args.epochs, state['lr']))
 
-        train_loss, train_acc = train(trainloader, model, criterion, optimizer, epoch, use_cuda)
+        train_loss, train_acc = train(trainloader, model, criterion, optimizer, look_up_table, epoch, use_cuda)
         test_loss, test_acc = test(testloader, model, criterion, epoch, use_cuda)
 
         # append logger file
@@ -318,6 +296,26 @@ def main():
     print('Best acc:')
     print(best_acc)
 
+def model_retrain(finetune_epoch, test_model, trainloader, testloader, criterion, look_up_table, use_cuda):
+    print(' Retrain decoupled model')
+    finetune_epoch = 4
+    
+    best_acc = 0.0
+    optimizer = optim.SGD(test_model.parameters(), lr=args.lr, momentum=args.momentum,weight_decay=args.weight_decay)
+    global state
+    init_lr = args.lr
+    state['lr'] = init_lr
+ 
+    for epoch in range(finetune_epoch):
+
+        adjust_learning_rate(optimizer, epoch)
+        print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, finetune_epoch, state['lr']))
+        train_loss, train_acc = train(trainloader, test_model, criterion, optimizer, look_up_table, epoch, use_cuda)
+        test_loss, test_acc = test(testloader, test_model, criterion, look_up_table, epoch, use_cuda)
+        best_acc = max(test_acc, best_acc)
+
+    return best_acc
+
 def get_look_up_table(model):
     count = 0
     look_up_table = []
@@ -334,49 +332,24 @@ def get_look_up_table(model):
 
     return look_up_table
 
-def nuclear_regularize(model, look_up_table, state, verbose=False):
-
-    rate = state['nuclear_weight']
-
-    count = 0
-    for name, m in model.named_modules():
-        if name in look_up_table:
-            param = m.weight.data
-
-            dim = param.size()
-            VH = param.permute(1,2,0,3).contiguous().view(dim[1]*dim[2], -1)
-            try:
-                U, sigma, V = torch.svd(VH, some=True)
-
-                subgrad = torch.mm(U, V.t())
-                subgrad = subgrad.view(dim[1], dim[2], dim[0], dim[3])
-                subgrad = subgrad.permute(2, 0, 1, 3)
-            except:
-                subgrad = 0.0
-
-            m.weight.grad.data.add_(rate*subgrad)
-
-            if verbose and count == 3:
-                print('singulars in param %s: ' % name)
-                print(sigma)
-
-            count += 1
-
-def show_low_rank(model, input_size=None, criterion=None):
+def show_low_rank(model, look_up_table=[], input_size=None, criterion=None, type='NC'):
     
-    look_up_table = get_look_up_table(model)
-    # threshold = 0.9
-    # left = 0.25
     redundancy = OrderedDict()
     comp_rate = OrderedDict()
 
     if input_size is not None:
         if isinstance(input_size, int):
             input_size = [input_size, input_size]
-	elif isinstance(input_size, list):
+        elif isinstance(input_size, list):
             pass
         else:
             raise Exception
+
+    if criterion is None:
+        raise Exception('criterion must be set for sigma selection')
+
+    if input_size is None:
+        raise Exception('invalid input size')
 
     origin_FLOPs = 0.
     decouple_FLOPs = 0.
@@ -392,61 +365,112 @@ def show_low_rank(model, input_size=None, criterion=None):
 
         if name in look_up_table and m.stride == (1,1):
 
-            #NC = p.view(dim[0], -1)
-            #N, sigma, C = torch.svd(NC, some=True)
-            VH = p.permute(1,2,0,3).contiguous().view(dim[1]*dim[2],-1)
-            #
-            U, sigma, V =torch.svd(VH, some=True)
-            #print(sigma)
+            if type == 'NC':
+                NC = p.view(dim[0], -1)
+                N, sigma, C = torch.svd(NC, some=True)
+            else:
+                VH = p.permute(1,2,0,3).contiguous().view(dim[1]*dim[2],-1)
+                U, sigma, V =torch.svd(VH, some=True)
+
             if DEBUG:
                 print('sigma in module %s :' % name)
                 print(sigma)
-            if criterion is not None:
-                item_num = criterion(sigma)
-                print(item_num)
-                #print(item_num)
-                # lambda_ = (sigma**2).data
-                # sum_e = lambda_.sum()
-                # invalid = float(((sigma**2).data < threshold).sum())
-                # total = sigma.size(0)
-                # for i in xrange(total):
-                #     if lambda_[:(i+1)].sum()/sum_e > threshold:
-                #         item_num = i + 1
-                #         break
-                new_FLOPs = dim[1]*item_num*dim[2]+dim[0]*item_num*dim[3]
-                #new_FLOPs = dim[1]*dim[2]*dim[3]*item_num + item_num*dim[0]
-                rate = float(new_FLOPs)/FLOPs
-                # redundancy[name] = ('%.2f' % (float(item_num)/total*100) ) + '%'
-                comp_rate[name] = ('%.2f' % (rate) )
 
-        elif criterion is not None:
+            item_num = criterion(sigma)
+            ratio = m.stride[0]
+            
+            new_FLOPs = dim[1]*item_num*dim[2]+dim[0]*item_num*dim[3]/ratio if type == 'VH' else \
+                        dim[1]*dim[2]*dim[3]*item_num/ratio + item_num*dim[0]
+
+            rate = float(new_FLOPs)/FLOPs
+            # redundancy[name] = ('%.2f' % (float(item_num)/total*100) ) + '%'
+            comp_rate[name] = ('%.3f' % (rate) )
+        else:
             new_FLOPs = FLOPs
 
-        if input_size is not None and criterion is not None:
-            if 'downsample' not in name:
-                output_h = input_size[0]/m.stride[0]
-                output_w = input_size[1]/m.stride[1]
-            else:
+        if 'downsample' not in name:
+            # a special case for resnet
+            output_h = input_size[0]/m.stride[0]
+            output_w = input_size[1]/m.stride[1]
+        else:
+            output_h = input_size[0]
+            output_w = input_size[1]
 
-                output_h = input_size[0]
-                output_w = input_size[1]
-            origin_FLOPs += FLOPs*output_h*output_w
-            decouple_FLOPs += new_FLOPs*output_h*output_w
-            input_size = [output_h, output_w]
+        origin_FLOPs += FLOPs*output_h*output_w
+        decouple_FLOPs += new_FLOPs*output_h*output_w
+        input_size = [output_h, output_w]
 
-    if criterion is not None:
-        r = origin_FLOPs / decouple_FLOPs
-        # print(redundancy)
-        # print('\n')
+    r = origin_FLOPs / decouple_FLOPs
+    if DEBUG:
         print(comp_rate)
         print('\n')
         print('comp rate:')
         print(r)
 
-        return r
-             
+    return r
 
-def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
+def low_rank_approx(model, look_up_table, criterion, use_trp, type='NC'):
+    dict2 = model.state_dict()
+    sub=dict()
+    #can set m here
+    for name in dict2:
+        param = dict2[name]
+        dim = param.size()
+        model_name = name[:-7] if len(dim) == 4 else ''
+
+        if len(dim) == 4 and model_name in look_up_table:
+            if type=='VH':
+                VH = param.permute(1, 2, 0, 3).contiguous().view(dim[1]*dim[2], -1)
+                try:
+                    V, sigma, H = torch.svd(VH, some=True)
+                    # print(sigma.size())
+                    H = H.t()
+                    # remain large singular value
+                    valid_idx = criterion(sigma)
+                    V = V[:, :valid_idx].contiguous()
+                    sigma = sigma[:valid_idx]
+                    dia = torch.diag(sigma)
+                    H = H[:valid_idx, :]
+                    if use_trp:
+                        new_VH = (V.mm(dia)).mm(H)
+                        new_VH = new_VH.contiguous().view(dim[1], dim[2], dim[0], dim[3]).permute(2, 0, 1, 3)
+                        dict2[name].copy_(new_VH)
+                    subgradient = torch.mm(V, H)
+                    subgradient = subgradient.contiguous().view(dim[1], dim[2], dim[0], dim[3]).permute(2, 0, 1, 3)
+                    sub[model_name] = subgradient
+                except:
+                    sub[model_name] = 0.0
+                    dict2[name].copy_(param)
+            else:
+                NC = param.contiguous().view(dim[0], -1)
+                try:
+                    N, sigma, C = torch.svd(NC, some=True)
+                    # print(sigma.size())
+                    C = C.t()
+                    # remain large singular value
+                    valid_idx = criterion(sigma)
+                    N = N[:, :valid_idx].contiguous()
+                    sigma = sigma[:valid_idx]
+                    dia = torch.diag(sigma)
+                    C = C[:valid_idx, :]
+                    if use_trp:
+                        new_NC = (N.mm(dia)).mm(C)
+                        new_NC = new_NC.contiguous().view(dim[0], dim[1], dim[2], dim[3])
+                        dict2[name].copy_(new_NC)
+                    subgradient = torch.mm(N, C)
+                    subgradient = subgradient.contiguous().view(dim[0], dim[1], dim[2], dim[3])
+                    sub[model_name] = subgradient
+                except:
+                    sub[model_name] = 0.0
+                    dict2[name].copy_(param)
+        else:
+            dict2[name].copy_(param)
+    model.load_state_dict(dict2)
+
+    return model, sub
+
+
+def train(trainloader, model, criterion, optimizer, look_up_table, epoch, use_cuda):
     # switch to train mode
     model.train()
 
@@ -458,145 +482,48 @@ def train(trainloader, model, criterion, optimizer, epoch, use_cuda):
     end = time.time()
 
     bar = Bar('Processing', max=len(trainloader))
-    look_up_table = get_look_up_table(model)
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        dict2 = model.state_dict()
-        sub=[]
-        #can set m here
-        for name in dict2:
-            param = dict2[name]
 
-            if name[:-7] in look_up_table:
-                #NC = param.view(param.size()[0], -1)  # [N x CHW]
-                #print(NC)
-                dim=param.size()
-                NC = param.permute(1, 2, 0, 3).contiguous().view(dim[1] * dim[2], -1)
-                try:
-                    N, sigma, C = torch.svd(NC, some=True)
-                    #print(sigma.size())
-                    C = C.t()
-                    # remain large singular value
-                    energy = sigma ** 2
-                    sum_e = torch.sum(energy)
-                    # print(energy)
-                    # print(sum_e)
-                    for i in xrange(energy.size(0)):
-                        if energy[:(i + 1)].sum() / sum_e >= 0.99:
-                            valid_idx = i + 1
-                            break
-                    N = N[:, :valid_idx].contiguous()
-                    sigma = sigma[:valid_idx]
-                    dia = torch.diag(sigma)
-                    C = C[:valid_idx, :]
-                    new_NC = (N.mm(dia)).mm(C)
-                    #print(sigma1)
-                    new_NC = new_NC.contiguous().view(dim[1], dim[2], dim[0], dim[3]).permute(2, 0, 1, 3)
-                    dict2[name].copy_(new_NC)
-                    subgradient = torch.mm(N, C)
-                    subgradient = subgradient.contiguous().view(dim[1], dim[2], dim[0], dim[3]).permute(2, 0, 1, 3)
-                    sub.append(subgradient)
-                except:
-                    sub.append(0.0)
-                    dict2[name].copy_(param)
-                    #raise Exception('svd failed during decoupling')
-            else:
-                dict2[name].copy_(param)
-        model.load_state_dict(dict2)
-       
+        if batch_idx % period == 0:
+            model, sub = low_rank_approx(model, look_up_table, criterion=EnergyThreshold(0.98), use_trp=args.trp, type=args.type)      
 
         # measure data loading time
         data_time.update(time.time() - end)
 
         if use_cuda:
             inputs, targets = inputs.cuda(), targets.cuda(async=True)
-        inputs, targets = torch.autograd.Variable(inputs), torch.autograd.Variable(targets)
 
         # compute output
         outputs = model(inputs)
         loss = criterion(outputs, targets)
-        #new_out = new_model(inputs)
-        #new_loss = criterion(new_out,targets)
-
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(outputs.data, targets.data, topk=(1, 5))
-        losses.update(loss.data[0], inputs.size(0))
-        top1.update(prec1[0], inputs.size(0))
-        top5.update(prec5[0], inputs.size(0))
+        losses.update(loss.item(), inputs.size(0))
+        top1.update(prec1.item(), inputs.size(0))
+        top5.update(prec5.item(), inputs.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
-        #new_loss.backward()
-        #uncomment if need nuclear regularization 
-        '''
-        ii=0
-        for name, m in model.named_modules():
-            if name in look_up_table:
-
-                m.weight.grad.data.add_(0.0003 *sub[ii])
-                ii+=1
-        '''
-        #grad = []
-        #new_model.zero_grad()
-        # for f in model.parameters():
-        #     grad.append(f.grad.data)
-        # for i,f in enumerate(new_model.parameters()):
-        #     f.grad.data.copy_(grad[i])
-        # for name, m in model.named_modules():
-        #     grad = m.weight.grad.data
-        #     dict.update({name+'.weight':grad})
-        #     grad = m.bias.grad.data
-        #     dict.update({name + '.bias': grad})
-        #model.zero_grad()
-        # for new_name, new_m in new_model.named_modules():
-        #     new_m.weight.grad.data.copy_(dict[new_name+'.weight'])
-        #     new_m.bias.grad.data.copy_(dict[new_name + '.bias'])
-
-
-        # for name in dict2:
-        #     print(name)
-        #     print(dict2[name])
-        #     grad = dict2[name].grad()
-        #     dict1[name].grad.copy_(grad)
-        #     zeros = torch.zeros(dict2[name].size())
-        #     dict2[name].grad.copy_(zeros)
-        # optimizer.step()
-        optimizer.step()
-
-
-	
-        # if args.nuclear_weight is not None:
-        #     f_decouple(model,look_up_table,criterion=None,train=True,lambda_=state['nuclear_weight'], truncate=0.1)
-            #nuclear_regularize(model, look_up_table, state, verbose=False)
-	
-        # count = 0
-        """
+        
+        # apply nuclear norm regularization
+        if args.nuclear_weight is not None and batch_idx % period == 0:
             for name, m in model.named_modules():
-            if name in look_up_table and isinstance(m, nn.Conv2d):
-                param = m.weight
-                dim = param.size()
-                # print(dim)
-                VH = param.permute(1,2,0,3).contiguous().view(dim[1]*dim[2], -1)
-    
-                U, sigma, V = torch.svd(VH, some=True)
-                if count == 5:
-                    print(sigma)
-                count += 1
-        """
+                if name in look_up_table:
+                    m.weight.grad.data.add_(args.nuclear_weight*sub[name])
 
+        optimizer.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
         # plot progress
-        bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+        bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
                     batch=batch_idx + 1,
                     size=len(trainloader),
                     data=data_time.avg,
-                    total=bar.elapsed_td,
-                    eta=bar.eta_td,
                     loss=losses.avg,
                     top1=top1.avg,
                     top5=top5.avg,
@@ -618,7 +545,7 @@ def test(testloader, model, criterion, epoch, use_cuda):
     model.eval()
 
     end = time.time()
-    flag = True
+    DEBUG = False
     bar = Bar('Processing', max=len(testloader))
     for batch_idx, (inputs, targets) in enumerate(testloader):
         # measure data loading time
@@ -626,35 +553,26 @@ def test(testloader, model, criterion, epoch, use_cuda):
 
         if use_cuda:
             inputs, targets = inputs.cuda(), targets.cuda()
-        inputs, targets = torch.autograd.Variable(inputs, volatile=True), torch.autograd.Variable(targets)
 
         # compute output
         outputs = model(inputs)
-        # if flag:
-        #     print('shape of feature map is:')
-        #     for i in range(18):
-        #         print(samples[i].shape)
-        #     flag = False
-
         loss = criterion(outputs, targets)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(outputs.data, targets.data, topk=(1, 5))
-        losses.update(loss.data[0], inputs.size(0))
-        top1.update(prec1[0], inputs.size(0))
-        top5.update(prec5[0], inputs.size(0))
+        losses.update(loss.item(), inputs.size(0))
+        top1.update(prec1.item(), inputs.size(0))
+        top5.update(prec5.item(), inputs.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
         # plot progress
-        bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+        bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
                     batch=batch_idx + 1,
                     size=len(testloader),
                     data=data_time.avg,
-                    total=bar.elapsed_td,
-                    eta=bar.eta_td,
                     loss=losses.avg,
                     top1=top1.avg,
                     top5=top5.avg,

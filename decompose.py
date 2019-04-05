@@ -33,9 +33,8 @@ class EnergyThreshold(object):
             energy = sigmas
 
         sum_e = torch.sum(energy)
-        # print(energy)
-        # print(sum_e)
-        for i in xrange(energy.size(0)):
+        valid_idx = sigmas.size(0)
+        for i in range(energy.size(0)):
             if energy[:(i+1)].sum()/sum_e >= self.T:
                 valid_idx = i+1
                 break
@@ -65,7 +64,8 @@ class ValueThreshold(object):
 
     def __call__(self, sigmas):
         # input sigmas should be a sorted array from large to small
-        for i in xrange(len(sigmas)):
+        valid_idx = sigmas.size(0)
+        for i in range(len(sigmas)):
             if sigmas[i] < self.T:
                 valid_idx = i
                 break
@@ -100,21 +100,17 @@ def channel_decompose(model_in, look_up_table, criterion, train=True, lambda_=0.
             param = m.weight.data
             dim = param.size()
             
-            if m.bias:
-               
+            if m.bias:             
                 hasb = True
                 b = m.bias.data
             else:
                 hasb = False
             
-            #hasb = True
-            #b = m.bias.data
             NC = param.view(dim[0], -1) # [N x CHW]
 
             try:
                 N, sigma, C = torch.svd(NC, some=True)
                 C = C.t()
-
                 # remain large singular value
                 if not train:
                     valid_idx = criterion(sigma)
@@ -138,7 +134,7 @@ def channel_decompose(model_in, look_up_table, criterion, train=True, lambda_=0.
                 N = torch.mm(N,torch.diag(torch.sqrt(sigma)))
 
                 C = C.view(r,dim[1],dim[2], dim[3])
-		N = N.view(dim[0], r, 1, 1)
+                N = N.view(dim[0], r, 1, 1)
 
                 new_m = nn.Sequential(
                     OrderedDict([
@@ -146,7 +142,7 @@ def channel_decompose(model_in, look_up_table, criterion, train=True, lambda_=0.
                         ('N', nn.Conv2d(r, dim[0], 1, 1, 0, bias=hasb))
                     ])
                 )
-		
+        
              
                 state_dict = new_m.state_dict()
                 print(name+'.C.weight'+' <-- '+name+'.weight')
@@ -204,12 +200,6 @@ def VH_decompose_model(model_in, look_up_table, criterion, train=True, lambda_=0
                 H = H.t()
                 # remain large singular value
                 if train:
-                    #rank = sigma.size(0)
-                    #inter = torch.exp(-1*sigma**2/0.001)
-                    # inter = torch.ones(rank)
-                    # trunc = int(rank * truncate)
-                    # trunc = max(1, min(trunc, rank))
-                    # inter[:trunc] = 0.0
                     subgradient = torch.mm(V, H)
                     subgradient = subgradient.contiguous().view(dim[1], dim[2], dim[0], dim[3]).permute(2, 0, 1, 3)
                     #print(sigma)
@@ -218,7 +208,6 @@ def VH_decompose_model(model_in, look_up_table, criterion, train=True, lambda_=0
                     V = V[:, :valid_idx].contiguous()
                     sigma = sigma[:valid_idx]
                     H = H[:valid_idx, :]
-
             except:
                 if train:
                     subgradient = 0.0
@@ -236,8 +225,8 @@ def VH_decompose_model(model_in, look_up_table, criterion, train=True, lambda_=0
 
                 new_m = nn.Sequential(
                 OrderedDict([
-                    ('V', nn.Conv2d(dim[1], r, kernel_size=(int(dim[2]),1),stride=(1, 1),padding=(m.padding[0],0), 	bias=False)),
-                    ('H', nn.Conv2d(r, dim[0], kernel_size=(1,int(dim[3])),stride=(1, 1),padding=(0,m.padding[1]), 	bias=hasb))])
+                    ('V', nn.Conv2d(dim[1], r, kernel_size=(int(dim[2]),1),stride=(1, 1),padding=(m.padding[0],0),  bias=False)),
+                    ('H', nn.Conv2d(r, dim[0], kernel_size=(1,int(dim[3])),stride=(1, 1),padding=(0,m.padding[1]),  bias=hasb))])
                 )
 
                 state = new_m.state_dict()
