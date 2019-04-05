@@ -379,8 +379,8 @@ def show_low_rank(model, look_up_table=[], input_size=None, criterion=None, type
             item_num = criterion(sigma)
             ratio = m.stride[0]
             
-            new_FLOPs = dim[1]*item_num*dim[2]+dim[0]*item_num*dim[3]/ratio if type == 'VH' else \
-                        dim[1]*dim[2]*dim[3]*item_num/ratio + item_num*dim[0]
+            new_FLOPs = dim[1]*item_num*dim[2]+dim[0]*item_num*dim[3]/(ratio**2) if type == 'VH' else \
+                        dim[1]*dim[2]*dim[3]*item_num + item_num*dim[0]/(ratio**2)
 
             rate = float(new_FLOPs)/FLOPs
             # redundancy[name] = ('%.2f' % (float(item_num)/total*100) ) + '%'
