@@ -1,7 +1,7 @@
 # Trained-Rank-Pruning
-PyTorch code for ["Trained Rank Pruning for Efficient Deep Neural Networks"](https://arxiv.org/abs/1812.02402)<br>
+PyTorch code demo for ["Trained Rank Pruning for Efficient Deep Neural Networks"](https://arxiv.org/abs/1812.02402)<br>
 Our code is built based on  [bearpaw](https://github.com/bearpaw/pytorch-classification)<br>
-<img src=framework.png width=75%><br>
+<img src=framework.png width=80% align="middle"><br>
 What's in this repo so far:
  * TRP code for CIFAR-10 experiments
  * Nuclear regularization code for CIFAR-10 experiments
@@ -9,38 +9,40 @@ What's in this repo so far:
 #### Simple Examples
 ```Shell
 optional arguments:
-  -a                    model
-  --depth               layers
+  -a                    model_name
+  --depth               number layers
   --epoths              training epochs
   -c                    path to save checkpoints
   --gpu-id              specifiy using GPU or not
-  --nuclear-weight      nuclear regularization parameter
+  --nuclear-weight      nuclear regularization weight (if not set, nuclear  reglularization is not used)
+  --trp                 boolean value, set to enable TRP training
+  --type                the decompsition type 'NC' or 'VH'
 ```
 Training ResNet-20 baseline:
 
 ```
-python cifar-nuclear-regularization.py -a resnet --depth 20 --epochs 164 --schedule 81 122 --gamma 0.1 --wd 1e-4 --checkpoint checkpoints/cifar10/resnet-20 
+python cifar-TRP.py -a resnet --depth 20 --epochs 164 --schedule 81 122 --gamma 0.1 --wd 1e-4 --checkpoint checkpoints/cifar10/resnet-20 
 
 ```
 Training ResNet-20 with nuclear norm:
 
 ```
-python cifar-nuclear-regularization.py -a resnet --depth 20 --epochs 164 --schedule 81 122 --gamma 0.1 --wd 1e-4 --checkpoint checkpoints/cifar10/resnet-20 --nuclear-weight 0.0003
+python cifar-TRP.py -a resnet --depth 20 --epochs 164 --schedule 81 122 --gamma 0.1 --wd 1e-4 --checkpoint checkpoints/cifar10/resnet-20 --nuclear-weight 0.0003
 
 ```
-Training ResNet-20 with TRP:
+Training ResNet-20 with TRP and nuclear norm:
 ```
-python cifar-TRP.py -a resnet --depth 20 --epochs 164 --schedule 81 122 --gamma 0.1 --wd 1e-4 --checkpoint checkpoints/cifar10/resnet-20 --nuclear-weight 0.0003
+python cifar-TRP.py -a resnet --depth 20 --epochs 164 --schedule 81 122 --gamma 0.1 --wd 1e-4 --checkpoint checkpoints/cifar10/resnet-20 --nuclear-weight 0.0003 --trp --type NC
 
 ```
 Decompose the trained model without retraining:
 ```
-python cifar-nuclear-regularization.py.py -a resnet --depth 20 --resume checkpoints/cifar10/resnet-20/model_best.pth.tar --evaluate
+python cifar-nuclear-regularization.py.py -a resnet --depth 20 --resume checkpoints/cifar10/resnet-20/model_best.pth.tar --evaluate --type NC
 
 ```
 Decompose the trained model with retraining:
 ```
-python cifar-nuclear-regularization.py.py -a resnet --depth 20 --resume checkpoints/cifar10/resnet-20/model_best.pth.tar --evaluate --retrain
+python cifar-nuclear-regularization.py.py -a resnet --depth 20 --resume checkpoints/cifar10/resnet-20/model_best.pth.tar --evaluate --type NC --retrain
 
 ```
 
