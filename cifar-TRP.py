@@ -24,7 +24,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig
-from decompose import VH_decompose_model,channel_decompose, \
+from decompose import VH_decompose_model,channel_decompose, network_decouple, \
     EnergyThreshold, ValueThreshold, LinearRate
 
 
@@ -83,7 +83,7 @@ parser.add_argument('--gpu-id', default='0', type=str,
 #decouple options
 parser.add_argument('--decouple-period', '-dp', type=int, default=1, help='set the period of TRP')
 parser.add_argument('--trp', dest='trp', help='set this option to enable TRP during training', action='store_true')
-parser.add_argument('--type', type=str, help='the type of decouple', choices=['NC','VH'], default='NC')
+parser.add_argument('--type', type=str, help='the type of decouple', choices=['NC','VH','ND'], default='NC')
 parser.add_argument('--nuclear-weight', type=float, default=None, help='The weight for nuclear norm regularization')
 parser.add_argument('--retrain', dest='retrain',help='wether retrain from a decoupled model, only valid when evaluation is on', action='store_true')
 
@@ -118,6 +118,8 @@ if args.type == 'VH':
     f_decouple = VH_decompose_model
 elif args.type == 'NC':
     f_decouple = channel_decompose
+elif args.type == 'ND':
+    f_decouple = network_decouple
 else:
     raise NotImplementedError('no such decouple type %s' % args.type)
 
@@ -231,7 +233,8 @@ def main():
         print(' Start decomposition:')
 
         # set different threshold for model compression and test accuracy
-        thresholds = [5e-2] 
+        thresholds = [5e-2] if args.type != 'ND' else [0.95]
+        sigma_criterion = ValueThreshold if args.type != 'ND' else EnergyThreshold
         T = np.array(thresholds)
         cr = np.zeros(T.shape)
         acc = np.zeros(T.shape)
@@ -243,8 +246,8 @@ def main():
         for i, t in enumerate(thresholds):
             test_model = torch.load(model_path)        
 
-            cr[i] = show_low_rank(test_model, look_up_table, input_size=[32, 32], criterion=ValueThreshold(t), type=args.type)
-            test_model = f_decouple(test_model, look_up_table, criterion=ValueThreshold(t), train=False)
+            cr[i] = show_low_rank(test_model, look_up_table, input_size=[32, 32], criterion=sigma_criterion(t), type=args.type)
+            test_model = f_decouple(test_model, look_up_table, criterion=sigma_criterion(t), train=False)
             #print(model)
             print(' Done! test decoupled model')
             test_loss, test_acc = test(testloader, test_model, criterion, start_epoch, use_cuda)
@@ -368,22 +371,24 @@ def show_low_rank(model, look_up_table=[], input_size=None, criterion=None, type
             if type == 'NC':
                 NC = p.view(dim[0], -1)
                 N, sigma, C = torch.svd(NC, some=True)
-            else:
+                item_num = criterion(sigma)
+                new_FLOPs = dim[1]*dim[2]*dim[3]*item_num + item_num*dim[0]
+            elif type == 'VH':
                 VH = p.permute(1,2,0,3).contiguous().view(dim[1]*dim[2],-1)
-                U, sigma, V =torch.svd(VH, some=True)
-
-            if DEBUG:
-                print('sigma in module %s :' % name)
-                print(sigma)
-
-            item_num = criterion(sigma)
-            ratio = m.stride[0]
-            
-            new_FLOPs = dim[1]*item_num*dim[2]+dim[0]*item_num*dim[3]/(ratio**2) if type == 'VH' else \
-                        dim[1]*dim[2]*dim[3]*item_num + item_num*dim[0]/(ratio**2)
+                V, sigma, H =torch.svd(VH, some=True)
+                item_num = criterion(sigma)
+                new_FLOPs = dim[1]*item_num*dim[2]+dim[0]*item_num*dim[3]
+            else:
+                valid_idx = 0
+                for i in range(dim[0]):
+                    W = p[i, :, :, :].view(dim[1], -1)
+                    U, sigma, V = torch.svd(W, some=True)
+                    valid_idx += criterion(sigma)
+                item_num = int(valid_idx/dim[0])
+                new_FLOPs = (dim[0]*dim[1] + dim[0]*dim[2]*dim[3])*item_num
 
             rate = float(new_FLOPs)/FLOPs
-            # redundancy[name] = ('%.2f' % (float(item_num)/total*100) ) + '%'
+
             comp_rate[name] = ('%.3f' % (rate) )
         else:
             new_FLOPs = FLOPs
@@ -441,7 +446,7 @@ def low_rank_approx(model, look_up_table, criterion, use_trp, type='NC'):
                 except:
                     sub[model_name] = 0.0
                     dict2[name].copy_(param)
-            else:
+            elif type == 'NC':
                 NC = param.contiguous().view(dim[0], -1)
                 try:
                     N, sigma, C = torch.svd(NC, some=True)
@@ -463,6 +468,36 @@ def low_rank_approx(model, look_up_table, criterion, use_trp, type='NC'):
                 except:
                     sub[model_name] = 0.0
                     dict2[name].copy_(param)
+            else:
+                # network decouple approximation
+                tmp = param.clone()
+                tmp_sub = param.clone()
+                valid_idx = 0
+
+                for i in range(dim[0]):
+                    W = param[i, :, :, :].view(dim[1], -1)
+                    try:
+                        U, sigma, V = torch.svd(W, some=True)
+                        V = V.t()
+                        valid_idx = criterion(sigma)
+                        U = U[:, :valid_idx].contiguous()
+                        V = V[:valid_idx, :].contiguous()
+                        sigma = sigma[:valid_idx]
+                        dia = torch.diag(sigma)
+                        if use_trp:
+                            new_W = (U.mm(dia)).mm(V)
+                            new_W = new_W.contiguous().view(dim[1], dim[2], dim[3])
+                            tmp[i, :, :, :] = new_W[...]
+                        subgradient = torch.mm(U, V)
+                        subgradient = subgradient.contiguous().view(dim[1], dim[2], dim[3])
+                        tmp_sub[i, :, :, :] = subgradient[...]
+                    except Exception as e:
+                        print(e)
+                        tmp_sub[i, :, :, :] = 0.0
+                        tmp[i, :, :, :] = param[i, :, :, :]
+
+                dict2[name].copy_(tmp)
+                sub[model_name] = tmp_sub
         else:
             dict2[name].copy_(param)
     model.load_state_dict(dict2)
@@ -485,7 +520,7 @@ def train(trainloader, model, criterion, optimizer, look_up_table, epoch, use_cu
     for batch_idx, (inputs, targets) in enumerate(trainloader):
 
         if batch_idx % period == 0:
-            model, sub = low_rank_approx(model, look_up_table, criterion=EnergyThreshold(0.98), use_trp=args.trp, type=args.type)      
+            model, sub = low_rank_approx(model, look_up_table, criterion=EnergyThreshold(0.95), use_trp=args.trp, type=args.type)      
 
         # measure data loading time
         data_time.update(time.time() - end)

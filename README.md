@@ -5,6 +5,12 @@ Our code is built based on  [bearpaw](https://github.com/bearpaw/pytorch-classif
 What's in this repo so far:
  * TRP code for CIFAR-10 experiments
  * Nuclear regularization code for CIFAR-10 experiments
+
+# prerequisite
+* torch
+* numpy
+* matplotlib
+* progress
  
 #### Simple Examples
 ```Shell
@@ -16,7 +22,7 @@ optional arguments:
   --gpu-id              specifiy using GPU or not
   --nuclear-weight      nuclear regularization weight (if not set, nuclear  reglularization is not used)
   --trp                 boolean value, set to enable TRP training
-  --type                the decompsition type 'NC' or 'VH'
+  --type                the decompsition type 'NC','VH','ND'
 ```
 Training ResNet-20 baseline:
 

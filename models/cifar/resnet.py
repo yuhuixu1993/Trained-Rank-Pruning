@@ -140,7 +140,6 @@ class ResNet(nn.Module):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)    # 32x32
-
         x = self.layer1(x)  # 32x32
         x = self.layer2(x)  # 16x16
         x = self.layer3(x)  # 8x8
