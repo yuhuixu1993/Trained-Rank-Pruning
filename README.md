@@ -63,6 +63,7 @@ During decomposition, TRP using value threshold(very small value to truncate sin
 |Resnet20| Origin |   None   | 0.27M | 1x    |91.74|
 |Resnet20| TRP+Nu |Channel| 0.1M | 2.17x|90.50|
 |Resnet20| TRP+Nu |Spatial| 0.08M | 2.84x |90.62|
+|Resnet20| TRP+Nu | ND | 0.14M | 2.04x | 90.88 |
 |Resnet32| Origin |   None   | 0.47M | 1x    |92.26|
 |Resnet32| TRP+Nu |Channel| 0.16M | 2.2x|91.40|
 |Resnet32| TRP+Nu |Spatial| 0.11M | 3.4x |91.39|

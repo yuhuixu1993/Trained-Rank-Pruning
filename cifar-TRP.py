@@ -233,7 +233,7 @@ def main():
         print(' Start decomposition:')
 
         # set different threshold for model compression and test accuracy
-        thresholds = [5e-2] if args.type != 'ND' else [0.95]
+        thresholds = [5e-2] if args.type != 'ND' else [0.85]
         sigma_criterion = ValueThreshold if args.type != 'ND' else EnergyThreshold
         T = np.array(thresholds)
         cr = np.zeros(T.shape)
@@ -259,7 +259,7 @@ def main():
                 finetune_epoch = 4
                 acc[i] = model_retrain(finetune_epoch, test_model, trainloader, \
                      testloader, criterion, look_up_table, use_cuda)
-
+        torch.save(test_model, 'model.pth.tar')
         torch.save(OrderedDict([('acc',acc),('cr', cr)]), result)
         print('compression ratio:')
         print(cr)
@@ -379,12 +379,12 @@ def show_low_rank(model, look_up_table=[], input_size=None, criterion=None, type
                 item_num = criterion(sigma)
                 new_FLOPs = dim[1]*item_num*dim[2]+dim[0]*item_num*dim[3]
             else:
-                valid_idx = 0
+                valid_idx = []
                 for i in range(dim[0]):
                     W = p[i, :, :, :].view(dim[1], -1)
                     U, sigma, V = torch.svd(W, some=True)
-                    valid_idx += criterion(sigma)
-                item_num = int(valid_idx/dim[0])
+                    valid_idx.append(criterion(sigma))
+                item_num = min(max(valid_idx), min(dim[1], dim[2]*dim[3]))
                 new_FLOPs = (dim[0]*dim[1] + dim[0]*dim[2]*dim[3])*item_num
 
             rate = float(new_FLOPs)/FLOPs
@@ -520,7 +520,7 @@ def train(trainloader, model, criterion, optimizer, look_up_table, epoch, use_cu
     for batch_idx, (inputs, targets) in enumerate(trainloader):
 
         if batch_idx % period == 0:
-            model, sub = low_rank_approx(model, look_up_table, criterion=EnergyThreshold(0.95), use_trp=args.trp, type=args.type)      
+            model, sub = low_rank_approx(model, look_up_table, criterion=EnergyThreshold(0.9), use_trp=args.trp, type=args.type)      
 
         # measure data loading time
         data_time.update(time.time() - end)
