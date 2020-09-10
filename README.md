@@ -1,5 +1,6 @@
 # Trained-Rank-Pruning
-PyTorch code demo for ["Trained Rank Pruning for Efficient Deep Neural Networks"](https://arxiv.org/abs/1812.02402)<br>
+Paper has been accepted by IJCAI2020.
+PyTorch code demo for ["Trained Rank Pruning for Efficient Deep Neural Networks"](https://arxiv.org/abs/2004.14566v1)<br>
 Our code is built based on  [bearpaw](https://github.com/bearpaw/pytorch-classification)<br>
 <img src=framework.png width=80% align="middle"><br>
 What's in this repo so far:
